@@ -1,46 +1,56 @@
 import { emergencyEvents } from '../config/db.js';
 
-export const receiveSos = (req, res) => {
-  const payload = req.body;
-  const { packet_id } = payload;
+export const handleSosIngestion = (req, res) => {
+  const { 
+    packet_id, 
+    device_id, 
+    emergency_type, 
+    priority, 
+    timestamp, 
+    latitude, 
+    longitude, 
+    message 
+  } = req.body;
 
+  // O(1) Deduplication Check using Mandatory packet_id
   if (emergencyEvents.has(packet_id)) {
     return res.status(200).json({
       success: true,
       status: "DUPLICATE_IGNORED",
-      message: "Event already processed.",
-      data: emergencyEvents.get(packet_id)
+      message: "Packet already processed by backend."
     });
   }
 
-  const sosRecord = {
+  const eventData = {
+    id: packet_id,
     packet_id,
-    sender_id: payload.sender_id,
-    type: payload.type,
-    priority: payload.priority || 'MEDIUM',
-    timestamp: payload.timestamp || new Date().toISOString(),
-    latitude: payload.latitude !== undefined ? payload.latitude : null,
-    longitude: payload.longitude !== undefined ? payload.longitude : null,
-    message: payload.message || '',
+    device_id,
+    emergency_type,
+    priority,
+    message,
+    location: {
+      latitude: Number(latitude),
+      longitude: Number(longitude)
+    },
     status: 'ACTIVE',
-    received_at: new Date().toISOString()
+    received_at: timestamp
   };
 
-  emergencyEvents.set(packet_id, sosRecord);
+  emergencyEvents.set(packet_id, eventData);
 
   return res.status(201).json({
     success: true,
     status: "CREATED",
-    data: sosRecord
+    data: eventData
   });
 };
 
-export const getAllEvents = (req, res) => {
-  const events = Array.from(emergencyEvents.values());
+export const getActiveEvents = (req, res) => {
+  const eventsList = Array.from(emergencyEvents.values());
   return res.status(200).json({
     success: true,
-    count: events.length,
-    data: events
+    count: eventsList.length,
+    data: eventsList
   });
 };
 
@@ -48,13 +58,30 @@ export const updateEventStatus = (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!emergencyEvents.has(id)) {
-    return res.status(404).json({ success: false, error: "Event not found" });
+  const ALLOWED_STATUSES = ['ACTIVE', 'IN_PROGRESS', 'RESOLVED'];
+
+  if (!status || !ALLOWED_STATUSES.includes(status)) {
+    return res.status(400).json({
+      success: false,
+      error: "INVALID_STATUS",
+      message: `Status must be one of: ${ALLOWED_STATUSES.join(', ')}`
+    });
   }
 
-  const event = emergencyEvents.get(id);
-  event.status = status || event.status;
-  emergencyEvents.set(id, event);
+  if (!emergencyEvents.has(id)) {
+    return res.status(404).json({
+      success: false,
+      error: "NOT_FOUND",
+      message: "Event ID not found."
+    });
+  }
 
-  return res.status(200).json({ success: true, data: event });
+  const existingEvent = emergencyEvents.get(id);
+  existingEvent.status = status;
+  emergencyEvents.set(id, existingEvent);
+
+  return res.status(200).json({
+    success: true,
+    data: existingEvent
+  });
 };
