@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KavachLink — Live Tactical Rescue Command Center</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet OpenStreetMap -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        #map { height: calc(100vh - 120px); width: 100%; border-radius: 12px; z-index: 1; }
+        
+        /* Red Glowing Pulse Animation */
+        .pulse-icon {
+            background-color: #ef4444;
+            border-radius: 50%;
+            border: 2px solid #ffffff;
+            box-shadow: 0 0 0 rgba(239, 68, 68, 0.8);
+            animation: pulse-ring 1.2s infinite;
+        }
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.8); }
+            70% { box-shadow: 0 0 0 16px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
+
+    <!-- TOP HEADER -->
+    <header class="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-md">
+        <div class="flex items-center space-x-3">
+            <div class="p-2.5 bg-red-600 rounded-xl text-white shadow-lg shadow-red-600/30 animate-pulse">
+                <i class="fa-solid fa-satellite-dish text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-black tracking-widest text-slate-900 flex items-center">
+                    KAVACHLINK 
+                    <span class="text-[10px] bg-red-100 text-red-600 border border-red-300 px-2.5 py-0.5 rounded-full ml-3 font-bold">
+                        LIVE COMMAND CENTER
+                    </span>
+                </h1>
+                <p class="text-xs text-slate-500 font-medium">Off-Grid LoRa Emergency Network • O(1) Deduplication Active</p>
+            </div>
+        </div>
+
+        <!-- STATS -->
+        <div class="flex space-x-4">
+            <div class="bg-slate-50 border border-slate-200 px-4 py-1.5 rounded-xl text-center shadow-sm">
+                <span class="text-[10px] text-slate-500 block font-bold uppercase">Total Alerts</span>
+                <span id="stat-total" class="font-extrabold text-lg text-slate-800">0</span>
+            </div>
+            <div class="bg-red-50 border border-red-200 px-4 py-1.5 rounded-xl text-center shadow-sm">
+                <span class="text-[10px] text-red-600 block font-bold uppercase">Critical SOS</span>
+                <span id="stat-high" class="font-extrabold text-lg text-red-600">0</span>
+            </div>
+        </div>
+
+        <!-- SIMULATE BUTTON -->
+        <div>
+            <button id="sim-btn" onclick="triggerMockSOS()" class="bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-lg border border-red-400/30 flex items-center cursor-pointer">
+                <i class="fa-solid fa-triangle-exclamation mr-2"></i> SIMULATE LIVE SOS
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN DASHBOARD -->
+    <div class="flex-1 flex p-4 space-x-4 overflow-hidden">
+        <!-- LEFT PANEL -->
+        <div class="w-96 bg-white border border-slate-200 rounded-2xl flex flex-col shadow-lg">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-2xl">
+                <h2 class="font-bold text-xs text-slate-700 uppercase tracking-widest">
+                    <i class="fa-solid fa-list-check mr-2 text-red-500"></i> Incoming SOS Feeds
+                </h2>
+                <span id="feed-count" class="text-[10px] bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-full">0 Events</span>
+            </div>
+
+            <div id="sos-feed" class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/50">
+                <div id="empty-state" class="text-center py-20 text-slate-400">
+                    <i class="fa-solid fa-radar text-5xl mb-3 text-slate-300"></i>
+                    <p class="text-xs font-semibold">Click SIMULATE LIVE SOS to test!</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT MAP -->
+        <div class="flex-1 bg-white border border-slate-200 rounded-2xl p-2 relative shadow-lg">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <!-- SCRIPT -->
+    <script>
+        let map, markersGroup;
+        let emergencyEvents = new Map();
+
+        window.onload = () => {
+            try {
+                // Centered at Pune
+                map = L.map('map').setView([18.5204, 73.8567], 12);
+
+                // Original Standard OpenStreetMap Layer
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap contributors',
+                    maxZoom: 19
+                }).addTo(map);
+
+                markersGroup = L.layerGroup().addTo(map);
+            } catch (err) {
+                console.error("Map error:", err);
+            }
+        };
+
+        function renderEvents(events) {
+            if (!events || events.length === 0) return;
+
+            const emptyState = document.getElementById("empty-state");
+            if (emptyState) emptyState.remove();
+
+            let highCount = 0;
+            events.forEach(ev => emergencyEvents.set(ev.packet_id, ev));
+
+            document.getElementById("stat-total").innerText = emergencyEvents.size;
+            document.getElementById("feed-count").innerText = `${emergencyEvents.size} Events`;
+
+            markersGroup.clearLayers();
+            const feed = document.getElementById("sos-feed");
+            feed.innerHTML = "";
+
+            const sorted = Array.from(emergencyEvents.values()).sort((a,b) => b.timestamp - a.timestamp);
+
+            sorted.forEach(ev => {
+                if (ev.priority === "HIGH") highCount++;
+
+                const card = document.createElement("div");
+                const isHigh = ev.priority === "HIGH";
+                card.className = `p-3.5 rounded-xl border bg-white transition cursor-pointer hover:shadow-md ${isHigh ? 'border-red-500 shadow-red-100' : 'border-slate-200'}`;
+                
+                card.onclick = () => {
+                    if(ev.latitude && ev.longitude) {
+                        map.flyTo([ev.latitude, ev.longitude], 15);
+                    }
+                };
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-center mb-1.5">
+                        <span class="text-[10px] font-mono bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded border border-slate-200">ID: ${ev.packet_id}</span>
+                        <span class="text-[10px] font-black uppercase px-2 py-0.5 rounded ${isHigh ? 'bg-red-100 text-red-600 border border-red-200' : 'bg-amber-100 text-amber-700'}">${ev.priority}</span>
+                    </div>
+                    <p class="text-xs font-bold text-slate-800 mb-2">${ev.message}</p>
+                    <div class="flex justify-between text-[10px] text-slate-500 border-t border-slate-100 pt-2 font-medium">
+                        <span><i class="fa-solid fa-location-crosshairs mr-1 text-red-500"></i>${ev.latitude.toFixed(4)}, ${ev.longitude.toFixed(4)}</span>
+                        <span><i class="fa-solid fa-clock mr-1"></i>Live</span>
+                    </div>
+                `;
+                feed.appendChild(card);
+
+                if (ev.latitude && ev.longitude) {
+                    const customIcon = L.divIcon({
+                        className: 'pulse-icon',
+                        html: `<div style="background-color: ${isHigh ? '#ef4444' : '#f59e0b'}; width:16px; height:16px; border-radius:50%; border:2px solid white;"></div>`,
+                        iconSize: [16, 16],
+                        iconAnchor: [8, 8]
+                    });
+
+                    const marker = L.marker([ev.latitude, ev.longitude], { icon: customIcon })
+                                    .bindPopup(`<b>${ev.packet_id}</b><br/>${ev.message}`);
+                    
+                    markersGroup.addLayer(marker);
+                    map.flyTo([ev.latitude, ev.longitude], 13);
+                }
+            });
+
+            document.getElementById("stat-high").innerText = highCount;
+        }
+
+        function triggerMockSOS() {
+            const randomLat = 18.5204 + (Math.random() - 0.5) * 0.04;
+            const randomLng = 73.8567 + (Math.random() - 0.5) * 0.04;
+
+            const mock = [{
+                packet_id: "PKT_" + Math.floor(1000 + Math.random() * 9000),
+                sender_id: "VICTIM_MOBILE_NODE",
+                priority: Math.random() > 0.3 ? "HIGH" : "MEDIUM",
+                timestamp: Date.now(),
+                latitude: randomLat,
+                longitude: randomLng,
+                message: "EMERGENCY: Flood water rising rapidly! Need immediate boat evacuation."
+            }];
+
+            renderEvents(mock);
+        }
+    </script>
+</body>
+</html>
