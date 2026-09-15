@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KavachLink Tactical Command Center</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        .radar-pulse {
+            border-radius: 50%;
+            height: 20px;
+            width: 20px;
+            position: absolute;
+            left: -10px;
+            top: -10px;
+            background: rgba(239, 68, 68, 0.6);
+            animation: pulsate 1.5s ease-out infinite;
+            opacity: 0;
+        }
+        @keyframes pulsate {
+            0% { transform: scale(0.1); opacity: 0.0; }
+            50% { opacity: 1.0; }
+            100% { transform: scale(2.5); opacity: 0.0; }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
+
+    <!-- Top Header Navigation -->
+    <header class="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-sm z-10">
+        <div class="flex items-center space-x-3">
+            <div class="bg-red-600 text-white p-2 rounded-lg shadow-md">
+                <i class="fa-solid fa-shield-halved text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-extrabold tracking-tight text-slate-900 leading-none">KavachLink Tactical Command Center</h1>
+                <p class="text-xs font-semibold text-slate-500 mt-1">Off-Grid LoRa Emergency Response System (Team MASS Coders)</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-4">
+            <!-- Connection Status Badge -->
+            <div id="statusBadge" class="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full flex items-center border border-amber-200">
+                <span class="w-2 h-2 mr-2 bg-amber-500 rounded-full animate-ping"></span>Connecting to Backend...
+            </div>
+            
+            <!-- Active Alerts Badge -->
+            <div class="bg-red-50 text-red-700 border border-red-200 px-3 py-1 rounded-lg text-xs font-bold flex items-center">
+                <span>Active Alerts:</span>
+                <span id="alertCount" class="ml-1 text-sm font-extrabold">0</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Layout Container -->
+    <main class="flex-1 flex overflow-hidden p-4 gap-4">
+
+        <!-- Left Column: Live Emergency Feed -->
+        <aside class="w-1/3 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wider">Emergency Feed</h2>
+                <span class="text-[10px] text-slate-400 font-mono">Auto-Refreshing (2s)</span>
+            </div>
+
+          
+            <div id="emergencyFeedContainer" class="flex-1 overflow-y-auto p-3 space-y-3">
+                <div class="text-center py-12 text-slate-400">
+                    <i class="fa-solid fa-circle-notch fa-spin text-slate-300 text-2xl mb-2"></i>
+                    <p class="text-xs">Listening for inbound LoRa SOS signals...</p>
+                </div>
+            </div>
+        </aside>
+
+      
+        <section class="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden relative">
+            <div id="map" class="w-full h-full z-0"></div>
+        </section>
+
+    </main>
+
+   
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+   
+    <script>
+       
+        const map = L.map('map').setView([18.5204, 73.8567], 12);
+
+       
+        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            maxZoom: 17,
+            attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap'
+        }).addTo(map);
+
+        let activeMarkers = {};
+
+     
+        const createCustomMarker = () => {
+            return L.divIcon({
+                className: 'custom-radar-icon',
+                html: `<div class="radar-pulse"></div>
+                       <div style="background-color: #ef4444; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 8px rgba(0,0,0,0.4);"></div>`,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+        };
+
+       
+        async function syncWithBackend() {
+            const statusBadge = document.getElementById('statusBadge');
+            const alertCountEl = document.getElementById('alertCount');
+            const container = document.getElementById('emergencyFeedContainer');
+
+            try {
+                const response = await fetch('http://localhost:5000/api/events');
+                if (!response.ok) throw new Error('Backend HTTP request failed');
+                
+                const responseData = await response.json();
+                
+              
+                const events = responseData.data || responseData.events || (Array.isArray(responseData) ? responseData : []);
+
+              
+                if (statusBadge) {
+                    statusBadge.className = 'px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-full flex items-center border border-emerald-200';
+                    statusBadge.innerHTML = '<span class="w-2 h-2 mr-2 bg-emerald-500 rounded-full animate-pulse"></span>ONLINE — CS2 Engine Sync';
+                }
+
+                if (alertCountEl) alertCountEl.innerText = events.length;
+
+               
+                if (events.length === 0) {
+                    if (container) {
+                        container.innerHTML = `
+                            <div class="text-center py-12 text-slate-400">
+                                <i class="fa-solid fa-shield-check text-emerald-500 text-3xl mb-2"></i>
+                                <p class="font-semibold text-slate-600">All Systems Normal</p>
+                                <p class="text-xs text-slate-400 mt-1">No active critical SOS alerts in queue.</p>
+                            </div>`;
+                    }
+                    return;
+                }
+
+              
+                if (container) container.innerHTML = '';
+
+                events.forEach((sos) => {
+                    const packetId = sos.packet_id || sos.id || 'UNKNOWN_ID';
+                    const lat = Number(sos.latitude);
+                    const lng = Number(sos.longitude);
+                    const priority = sos.priority || 'HIGH';
+                    const type = sos.emergency_type || sos.type || 'MEDICAL';
+                    const msg = sos.message || 'Emergency SOS Packet Ingested';
+                    const timeStr = sos.timestamp ? new Date(sos.timestamp).toLocaleTimeString() : 'Just Now';
+                    const hasValidCoords = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+
+                    if (container) {
+                        const cardHTML = `
+                            <div class="border-l-4 border-red-500 bg-slate-50 hover:bg-slate-100 p-3 rounded-r-lg border border-slate-200 transition">
+                                <div class="flex justify-between items-start mb-1">
+                                    <span class="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded tracking-wide uppercase">
+                                        ${priority} PRIORITY — ${type}
+                                    </span>
+                                    <span class="text-[10px] font-medium text-slate-400">${timeStr}</span>
+                                </div>
+                                <h4 class="text-xs font-bold text-slate-800 mt-1">ID: ${packetId}</h4>
+                                <p class="text-xs text-slate-600 mt-1">${msg}</p>
+                                <div class="mt-2 flex justify-between items-center text-[10px] text-slate-500 border-t border-slate-200 pt-2">
+                                    <span><i class="fa-solid fa-location-dot text-red-500 mr-1"></i>${hasValidCoords ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'GPS Searching...'}</span>
+                                    <span class="font-mono text-slate-400">Node: ${sos.device_id || 'Off-Grid'}</span>
+                                </div>
+                            </div>`;
+                        container.innerHTML += cardHTML;
+                    }
+
+                  
+                    if (hasValidCoords && !activeMarkers[packetId]) {
+                        const marker = L.marker([lat, lng], { icon: createCustomMarker() }).addTo(map);
+                        marker.bindPopup(`
+                            <div style="font-family: sans-serif; font-size: 12px;">
+                                <strong>[${priority}] ${type}</strong><br/>
+                                <span style="color: #666;">ID: ${packetId}</span><br/>
+                                <p style="margin: 4px 0 0 0;">${msg}</p>
+                            </div>
+                        `);
+                        activeMarkers[packetId] = marker;
+                    }
+                });
+
+            } catch (error) {
+                console.error('Backend Connection Error:', error);
+                if (statusBadge) {
+                    statusBadge.className = 'px-3 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-full flex items-center border border-red-200';
+                    statusBadge.innerHTML = '<span class="w-2 h-2 mr-2 bg-red-500 rounded-full animate-ping"></span>OFFLINE — CS2 Engine Disconnected';
+                }
+            }
+        }
+
+       
+        setInterval(syncWithBackend, 2000);
+        syncWithBackend();
+    </script>
+</body>
+</html>
