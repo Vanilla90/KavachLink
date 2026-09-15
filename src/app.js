@@ -1,32 +1,27 @@
-import 'dotenv/config';
 import express from 'express';
-import cors from 'cors';
+import cors from 'cors'; 
 import sosRoutes from './routes/sosRoutes.js';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+
+app.use(cors({
+    origin: '*', 
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 
-// Malformed JSON Request Error Handler
-app.use((err, req, res, next) => {
-  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-    return res.status(400).json({
-      success: false,
-      error: "MALFORMED_JSON",
-      message: "Invalid JSON payload structure received."
-    });
-  }
-  next();
-});
 
-app.use(sosRoutes);
+app.use('/', sosRoutes);
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'UP', service: 'KavachLink-Backend' });
-});
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[CS2 Backend] Server running on port ${PORT}`);
+app.get('/', (req, res) => {
+    res.status(200).json({ status: 'ONLINE', system: 'KavachLink CS2 Backend Ingestion API' });
 });
+const PORT = 5000;
+app.listen(PORT, () => {
+    console.log(`🚀 Shubham's Backend running on http://localhost:${PORT}`);
+});
+export default app;
